@@ -1,5 +1,7 @@
 import os
+import re
 import sys
+import json
 import pandas as pd
 from progress import Progress
 from scroller import Scroller
@@ -317,10 +319,10 @@ It may be due to the following:
                     print(
                         """There was an error inputting the password.
 
-It may be due to the following:
-- Internet connection is unstable
-- Password is incorrect
-- Twitter is experiencing unusual activity"""
+                            It may be due to the following:
+                            - Internet connection is unstable
+                            - Password is incorrect
+                            - Twitter is experiencing unusual activity"""
                     )
                     self.driver.quit()
                     sys.exit(1)
@@ -343,7 +345,6 @@ It may be due to the following:
         else:
             self.driver.get(f"https://twitter.com/{self.scraper_details['username']}")
             sleep(3)
-        pass
 
     def go_to_hashtag(self):
         if (
@@ -356,10 +357,8 @@ It may be due to the following:
             url = f"https://twitter.com/hashtag/{self.scraper_details['hashtag']}?src=hashtag_click"
             if self.scraper_details["tab"] == "Latest":
                 url += "&f=live"
-
             self.driver.get(url)
             sleep(3)
-        pass
 
     def go_to_bookmarks(self):
         if (
@@ -369,11 +368,9 @@ It may be due to the following:
             print("Bookmarks is not set.")
             sys.exit(1)
         else:
-            url = f"https://twitter..com/i/bookmarks"
-
+            url = "https://twitter.com/i/bookmarks"
             self.driver.get(url)
             sleep(3)
-        pass
 
     def go_to_search(self):
         if self.scraper_details["query"] is None or self.scraper_details["query"] == "":
@@ -383,20 +380,21 @@ It may be due to the following:
             url = f"https://twitter.com/search?q={self.scraper_details['query']}&src=typed_query"
             if self.scraper_details["tab"] == "Latest":
                 url += "&f=live"
-
+            elif self.scraper_details["tab"] == "Top":
+                url += "&f=top"
+            print(f"Navigating to search URL: {url}")  # Debug statement
             self.driver.get(url)
             sleep(3)
-        pass
 
     def go_to_list(self):
         if self.scraper_details["list"] is None or self.scraper_details["list"] == "":
             print("List is not set.")
             sys.exit(1)
         else:
-            url = f"https://x.com/i/lists/{self.scraper_details['list']}"
+            url = f"https://twitter.com/i/lists/{self.scraper_details['list']}"
             self.driver.get(url)
             sleep(3)
-        pass
+
 
     def get_tweet_cards(self):
         self.tweet_cards = self.driver.find_elements(
@@ -417,20 +415,29 @@ It may be due to the following:
         except Exception as e:
             return
         pass
+    
+    def clean_tweet_text(text):
+        text = text.replace("#", "")
+        text = re.sub(r'https?://(?:[-\w.]|(?:%[\da-fA-F]{2}))+', '', text)
+        text = re.sub(r'@\w+ *', '', text)
+        return text.strip()
 
     def scrape_tweets(
-        self,
-        max_tweets=50,
-        no_tweets_limit=False,
-        scrape_username=None,
-        scrape_hashtag=None,
-        scrape_bookmarks=False,
-        scrape_query=None,
-        scrape_list=None,
-        scrape_latest=True,
-        scrape_top=False,
-        scrape_poster_details=False,
-        router=None,
+    self,
+    max_tweets=50,
+    no_tweets_limit=False,
+    min_likes=0,
+    min_retweets=0,
+    min_followers=0,
+    scrape_username=None,
+    scrape_hashtag=None,
+    scrape_bookmarks=False,
+    scrape_query=None,
+    scrape_list=None,
+    scrape_latest=False,
+    scrape_top=True,
+    scrape_poster_details=False,
+    router=None,
     ):
         self._config_scraper(
             max_tweets,
@@ -515,9 +522,37 @@ It may be due to the following:
                             if tweet:
                                 if not tweet.error and tweet.tweet is not None:
                                     if not tweet.is_ad:
-                                        self.data.append(tweet.tweet)
-                                        added_tweets += 1
-                                        self.progress.print_progress(len(self.data), False, 0, no_tweets_limit)
+                                                                            # Extract engagement metrics and follower count
+                                        '''likes = int(tweet.tweet[7])  # Index for likes
+                                        retweets = int(tweet.tweet[6])  # Index for retweets
+                                        followers = int(tweet.tweet[17]) if len(tweet.tweet) > 17 else 0  # Follower count
+                                        if (
+                                        likes >= min_likes and
+                                        retweets >= min_retweets and
+                                        followers >= min_followers
+                                        ):'''
+                                        
+                                        likes = int(tweet.tweet[7])
+                                        retweets = int(tweet.tweet[6])
+                                        followers = int(tweet.tweet[17]) if len(tweet.tweet) > 17 else 0
+
+                                        if (
+                                            likes >= min_likes and
+                                            retweets >= min_retweets and
+                                            followers >= min_followers
+                                        ):
+                                            # CLEANING the tweet content before saving
+                                            content = tweet.tweet[4]  # assuming index 4 is the tweet's text/content
+                                            content = content.replace("#", "")
+                                            content = re.sub(r'https?://\S+', '', content)
+                                            content = re.sub(r'@\w+ *', '', content)
+                                            tweet.tweet[4] = content  # update the tweet's content
+
+                                            self.data.append(tweet.tweet)
+
+                                            self.data.append(tweet.tweet)
+                                            added_tweets += 1
+                                            self.progress.print_progress(len(self.data), False, 0, no_tweets_limit)
 
                                         if len(self.data) >= self.max_tweets and not no_tweets_limit:
                                             self.scroller.scrolling = False
@@ -630,6 +665,43 @@ It may be due to the following:
         print("CSV Saved: {}".format(file_path))
 
         pass
+    import json
+
+    def save_to_json(self):
+        print("Saving Tweets to JSON...")
+        now = datetime.now()
+        folder_path = "./tweets/"
+        
+        if not os.path.exists(folder_path):
+            os.makedirs(folder_path)
+            print(f"Created Folder: {folder_path}")
+        
+        data = [
+            {
+                "Name": tweet[0],
+                "Handle": tweet[1],
+                "Timestamp": tweet[2],
+                "Verified": tweet[3],
+                "Content": tweet[4],
+                "Comments": tweet[5],
+                "Retweets": tweet[6],
+                "Likes": tweet[7],
+                "Analytics": tweet[8],
+                "Tags": tweet[9],
+                "Mentions": tweet[10],
+                "Emojis": tweet[11],
+                "Profile Image": tweet[12],
+                "Tweet Link": tweet[13],
+                "Tweet ID": f"tweet_id:{tweet[14]}",
+            }
+            for tweet in self.data
+        ]
+
+        current_time = now.strftime("%Y-%m-%d_%H-%M-%S")
+        file_path = f"{folder_path}{current_time}_tweets_1-{len(self.data)}.json"
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+        print(f"JSON Saved: {file_path}")
 
     def get_tweets(self):
         return self.data
